@@ -60,9 +60,10 @@ function validatePatch(r, c, h, w, anchors, patches) {
   return { ok: true };
 }
 
-export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced }) {
+export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced, onPatchDeleted }) {
   const [drag, setDrag]         = useState(null);
   const [flashMsg, setFlashMsg] = useState(null);
+  const [flashGrid, setFlashGrid] = useState(false); // NEW: State for visual grid rejection
   const boardRef  = useRef(null);
   const msgTimer  = useRef(null);
 
@@ -92,26 +93,48 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     const c = Math.min(drag.startC, endC);
     const h = Math.abs(drag.startR - endR) + 1;
     const w = Math.abs(drag.startC - endC) + 1;
+    
     const result = validatePatch(r, c, h, w, anchors, patches);
     if (result.ok) {
       onPatchPlaced({ r, c, h, w });
       showFlash(null);
     } else {
       showFlash(result.reason, true);
+      // NEW: Trigger visual rejection (flash grid)
+      setFlashGrid(true);
+      setTimeout(() => setFlashGrid(false), 300);
     }
     setDrag(null);
   }, [drag, anchors, patches, onPatchPlaced]);
 
+  // NEW: Reusable helper to detect and delete an existing patch
+  const checkAndDeletePatch = (r, c) => {
+    const clickedIdx = patches.findIndex(p => 
+        r >= p.r && r < p.r + p.h && c >= p.c && c < p.c + p.w
+    );
+    if (clickedIdx !== -1) {
+        if (onPatchDeleted) onPatchDeleted(clickedIdx);
+        return true;
+    }
+    return false;
+  };
+
   const onMouseDown = e => {
     if (e.button !== 0) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
+    
+    // NEW: If we clicked a patch, delete it and abort starting a drag
+    if (checkAndDeletePatch(r, c)) return;
+
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
+  
   const onMouseMove = e => {
     if (!drag) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
     if (r !== drag.endR || c !== drag.endC) setDrag(d => ({ ...d, endR: r, endC: c }));
   };
+  
   const onMouseUp = e => {
     if (!drag) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
@@ -122,8 +145,13 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     e.preventDefault();
     const t = e.touches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
+    
+    // NEW: If we tapped a patch, delete it and abort starting a drag
+    if (checkAndDeletePatch(r, c)) return;
+
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
+  
   const onTouchMove = e => {
     e.preventDefault();
     if (!drag) return;
@@ -131,6 +159,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
     setDrag(d => ({ ...d, endR: r, endC: c }));
   };
+  
   const onTouchEnd = e => {
     e.preventDefault();
     if (!drag) return;
@@ -169,7 +198,10 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
       {/* Board */}
       <div
         ref={boardRef}
-        className="relative cursor-crosshair bg-gray-50 rounded-xl overflow-hidden select-none touch-none"
+        // NEW: Toggle background color to visually reject invalid shapes
+        className={`relative cursor-crosshair rounded-xl overflow-hidden select-none touch-none transition-colors duration-300 ${
+          flashGrid ? "bg-red-200" : "bg-gray-50"
+        }`}
         style={{ width: BOARD, height: BOARD }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}

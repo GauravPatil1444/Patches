@@ -67,18 +67,18 @@ export default function App() {
         setTimerActive(true);
       } catch {
         setError(
-          "Cannot reach backend. Make sure FastAPI is running on port 8000.",
+          "Cannot reach backend. Make sure FastAPI is running on port 8000."
         );
       } finally {
         setLoading(false);
       }
     },
-    [gridSize],
+    [gridSize]
   );
 
   useEffect(() => {
     fetchPuzzle();
-  }, []);
+  }, [fetchPuzzle]);
 
   const handlePatchPlaced = useCallback(
     (patch) => {
@@ -97,13 +97,24 @@ export default function App() {
       setColorIdx((c) => c + 1);
       setHintIdx(null);
     },
-    [patches, colorIdx, anchors, gridSize],
+    [patches, colorIdx, anchors, gridSize]
+  );
+
+  // NEW: Handle deleting a patch on click
+  const handlePatchDeleted = useCallback(
+    (idx) => {
+      setHistory((h) => [...h, patches]); // Save to history for Undo functionality
+      setPatches((p) => p.filter((_, i) => i !== idx));
+      setWon(false);
+    },
+    [patches]
   );
 
   const handleUndo = () => {
     if (history.length === 0) return;
     setPatches(history[history.length - 1]);
     setHistory((h) => h.slice(0, -1));
+    // Note: colorIdx might jump backwards slightly, but visually it works fine.
     setColorIdx((c) => Math.max(0, c - 1));
     setWon(false);
   };
@@ -115,10 +126,10 @@ export default function App() {
           .map((a, i) =>
             a.r >= p.r && a.r < p.r + p.h && a.c >= p.c && a.c < p.c + p.w
               ? i
-              : -1,
+              : -1
           )
-          .filter((i) => i !== -1),
-      ),
+          .filter((i) => i !== -1)
+      )
     );
     const uncovered = anchors
       .map((_, i) => i)
@@ -160,6 +171,7 @@ export default function App() {
             patches={patches}
             hintIdx={hintIdx}
             onPatchPlaced={handlePatchPlaced}
+            onPatchDeleted={handlePatchDeleted} /* Passed down to the board */
           />
         )}
 
