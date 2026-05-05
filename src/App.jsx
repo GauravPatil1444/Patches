@@ -8,18 +8,9 @@ import WinModal from "./components/WinModal";
 const API = "http://localhost:8000";
 
 const PATCH_COLORS = [
-  "#c8a830",
-  "#4db38a",
-  "#9b72c8",
-  "#38b8c8",
-  "#e05030",
-  "#50b8a0",
-  "#e07830",
-  "#c05080",
-  "#5890e0",
-  "#80c040",
-  "#e0a030",
-  "#7070d0",
+  "#c8a830", "#4db38a", "#9b72c8", "#38b8c8",
+  "#e05030", "#50b8a0", "#e07830", "#c05080",
+  "#5890e0", "#80c040", "#e0a030", "#7070d0",
 ];
 
 function getRandomColor(idx) {
@@ -67,13 +58,13 @@ export default function App() {
         setTimerActive(true);
       } catch {
         setError(
-          "Cannot reach backend. Make sure FastAPI is running on port 8000."
+          "Cannot reach backend. Make sure FastAPI is running on port 8000.",
         );
       } finally {
         setLoading(false);
       }
     },
-    [gridSize]
+    [gridSize],
   );
 
   useEffect(() => {
@@ -81,12 +72,20 @@ export default function App() {
   }, [fetchPuzzle]);
 
   const handlePatchPlaced = useCallback(
-    (patch) => {
-      const color = getRandomColor(colorIdx);
+    (patch, replaceIdxs = []) => {
+      // Inherit color from the merged patch, otherwise generate a new one
+      const color = replaceIdxs.length > 0 
+        ? patches[replaceIdxs[0]].color 
+        : getRandomColor(colorIdx);
+        
       const newPatch = { ...patch, color };
       setHistory((h) => [...h, patches]);
+
       setPatches((p) => {
-        const next = [...p, newPatch];
+        // Remove any patches that were merged into the new one
+        let next = p.filter((_, i) => !replaceIdxs.includes(i));
+        next = [...next, newPatch];
+        
         const covered = next.reduce((s, q) => s + q.h * q.w, 0);
         if (covered === gridSize * gridSize && next.length === anchors.length) {
           setWon(true);
@@ -94,16 +93,19 @@ export default function App() {
         }
         return next;
       });
-      setColorIdx((c) => c + 1);
+
+      // Only increment color index if we didn't merge
+      if (replaceIdxs.length === 0) {
+        setColorIdx((c) => c + 1);
+      }
       setHintIdx(null);
     },
-    [patches, colorIdx, anchors, gridSize]
+    [patches, colorIdx, anchors, gridSize],
   );
 
-  // NEW: Handle deleting a patch on click
   const handlePatchDeleted = useCallback(
     (idx) => {
-      setHistory((h) => [...h, patches]); // Save to history for Undo functionality
+      setHistory((h) => [...h, patches]);
       setPatches((p) => p.filter((_, i) => i !== idx));
       setWon(false);
     },
@@ -114,7 +116,6 @@ export default function App() {
     if (history.length === 0) return;
     setPatches(history[history.length - 1]);
     setHistory((h) => h.slice(0, -1));
-    // Note: colorIdx might jump backwards slightly, but visually it works fine.
     setColorIdx((c) => Math.max(0, c - 1));
     setWon(false);
   };
@@ -126,10 +127,10 @@ export default function App() {
           .map((a, i) =>
             a.r >= p.r && a.r < p.r + p.h && a.c >= p.c && a.c < p.c + p.w
               ? i
-              : -1
+              : -1,
           )
-          .filter((i) => i !== -1)
-      )
+          .filter((i) => i !== -1),
+      ),
     );
     const uncovered = anchors
       .map((_, i) => i)
@@ -171,7 +172,7 @@ export default function App() {
             patches={patches}
             hintIdx={hintIdx}
             onPatchPlaced={handlePatchPlaced}
-            onPatchDeleted={handlePatchDeleted} /* Passed down to the board */
+            onPatchDeleted={handlePatchDeleted}
           />
         )}
 

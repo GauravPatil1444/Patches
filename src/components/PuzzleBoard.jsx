@@ -41,7 +41,7 @@ function AnchorIcon({ type, number, hinted }) {
   );
 }
 
-function validatePatch(r, c, h, w, anchors, patches) {
+function validatePatch(r, c, h, w, anchors, patches, ignoreIdxs = []) {
   const contained = anchors.filter(
     a => a.r >= r && a.r < r + h && a.c >= c && a.c < c + w
   );
@@ -52,10 +52,14 @@ function validatePatch(r, c, h, w, anchors, patches) {
   if (a.type === "square" && h !== w) return { ok: false, reason: "Anchor requires a square" };
   if (a.type === "tall"   && h <= w)  return { ok: false, reason: "Anchor requires tall rectangle" };
   if (a.type === "wide"   && w <= h)  return { ok: false, reason: "Anchor requires wide rectangle" };
+  if (a.number && h * w !== a.number) return { ok: false, reason: `Anchor requires area of ${a.number}` };
 
-  const overlaps = patches.some(
-    p => !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w)
-  );
+  const overlaps = patches.some((p, i) => {
+    // Ignore the patch(es) we are intentionally merging with
+    if (ignoreIdxs.includes(i)) return false; 
+    return !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
+  });
+  
   if (overlaps) return { ok: false, reason: "Overlaps an existing patch" };
   return { ok: true };
 }
@@ -63,7 +67,7 @@ function validatePatch(r, c, h, w, anchors, patches) {
 export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced, onPatchDeleted }) {
   const [drag, setDrag]         = useState(null);
   const [flashMsg, setFlashMsg] = useState(null);
-  const [flashGrid, setFlashGrid] = useState(false); // NEW: State for visual grid rejection
+  const [flashGrid, setFlashGrid] = useState(false);
   const boardRef  = useRef(null);
   const msgTimer  = useRef(null);
 
@@ -89,25 +93,44 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
 
   const finalizeDrag = useCallback((endR, endC) => {
     if (!drag) return;
-    const r = Math.min(drag.startR, endR);
-    const c = Math.min(drag.startC, endC);
-    const h = Math.abs(drag.startR - endR) + 1;
-    const w = Math.abs(drag.startC - endC) + 1;
-    
-    const result = validatePatch(r, c, h, w, anchors, patches);
+    let r = Math.min(drag.startR, endR);
+    let c = Math.min(drag.startC, endC);
+    let h = Math.abs(drag.startR - endR) + 1;
+    let w = Math.abs(drag.startC - endC) + 1;
+
+    // Detect if the new drag overlaps existing patches to compute a MERGED bounding box
+    const overlappingIdxs = patches.map((p, i) => {
+      const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
+      return overlaps ? i : -1;
+    }).filter(i => i !== -1);
+
+    if (overlappingIdxs.length > 0) {
+      let minR = r, minC = c, maxR = r + h, maxC = c + w;
+      overlappingIdxs.forEach(idx => {
+        const p = patches[idx];
+        minR = Math.min(minR, p.r);
+        minC = Math.min(minC, p.c);
+        maxR = Math.max(maxR, p.r + p.h);
+        maxC = Math.max(maxC, p.c + p.w);
+      });
+      r = minR;
+      c = minC;
+      h = maxR - minR;
+      w = maxC - minC;
+    }
+
+    const result = validatePatch(r, c, h, w, anchors, patches, overlappingIdxs);
     if (result.ok) {
-      onPatchPlaced({ r, c, h, w });
+      onPatchPlaced({ r, c, h, w }, overlappingIdxs);
       showFlash(null);
     } else {
       showFlash(result.reason, true);
-      // NEW: Trigger visual rejection (flash grid)
       setFlashGrid(true);
       setTimeout(() => setFlashGrid(false), 300);
     }
     setDrag(null);
   }, [drag, anchors, patches, onPatchPlaced]);
 
-  // NEW: Reusable helper to detect and delete an existing patch
   const checkAndDeletePatch = (r, c) => {
     const clickedIdx = patches.findIndex(p => 
         r >= p.r && r < p.r + p.h && c >= p.c && c < p.c + p.w
@@ -122,10 +145,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
   const onMouseDown = e => {
     if (e.button !== 0) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
-    
-    // NEW: If we clicked a patch, delete it and abort starting a drag
     if (checkAndDeletePatch(r, c)) return;
-
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
@@ -145,10 +165,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     e.preventDefault();
     const t = e.touches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
-    
-    // NEW: If we tapped a patch, delete it and abort starting a drag
     if (checkAndDeletePatch(r, c)) return;
-
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
@@ -174,20 +191,39 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     return () => window.removeEventListener("mouseup", up);
   }, [drag]);
 
-  // Ghost rectangle during drag
+  // Ghost rectangle calculates the real-time merged visual layout during drag
   let ghost = null;
   if (drag) {
-    ghost = {
-      r: Math.min(drag.startR, drag.endR),
-      c: Math.min(drag.startC, drag.endC),
-      h: Math.abs(drag.startR - drag.endR) + 1,
-      w: Math.abs(drag.startC - drag.endC) + 1,
-    };
+    let r = Math.min(drag.startR, drag.endR);
+    let c = Math.min(drag.startC, drag.endC);
+    let h = Math.abs(drag.startR - drag.endR) + 1;
+    let w = Math.abs(drag.startC - drag.endC) + 1;
+
+    const overlappingIdxs = patches.map((p, i) => {
+      const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
+      return overlaps ? i : -1;
+    }).filter(i => i !== -1);
+
+    if (overlappingIdxs.length > 0) {
+      let minR = r, minC = c, maxR = r + h, maxC = c + w;
+      overlappingIdxs.forEach(idx => {
+        const p = patches[idx];
+        minR = Math.min(minR, p.r);
+        minC = Math.min(minC, p.c);
+        maxR = Math.max(maxR, p.r + p.h);
+        maxC = Math.max(maxC, p.c + p.w);
+      });
+      r = minR;
+      c = minC;
+      h = maxR - minR;
+      w = maxC - minC;
+    }
+
+    ghost = { r, c, h, w };
   }
 
   return (
     <div className="flex flex-col items-center gap-2">
-      {/* Error flash */}
       {flashMsg?.isError && (
         <div className="text-xs font-semibold px-3.5 py-1.5 rounded-full
                         bg-red-50 border border-red-200 text-red-600 animate-fade-in-up">
@@ -195,10 +231,8 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         </div>
       )}
 
-      {/* Board */}
       <div
         ref={boardRef}
-        // NEW: Toggle background color to visually reject invalid shapes
         className={`relative cursor-crosshair rounded-xl overflow-hidden select-none touch-none transition-colors duration-300 ${
           flashGrid ? "bg-red-200" : "bg-gray-50"
         }`}
@@ -211,11 +245,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         onTouchEnd={onTouchEnd}
       >
         {/* Grid lines */}
-        <svg
-          className="absolute inset-0 pointer-events-none"
-          width={BOARD}
-          height={BOARD}
-        >
+        <svg className="absolute inset-0 pointer-events-none" width={BOARD} height={BOARD}>
           {Array.from({ length: gridSize + 1 }).map((_, i) => (
             <g key={i}>
               <line x1={i * CELL} y1={0}     x2={i * CELL} y2={BOARD} stroke="#ddd" strokeWidth="1" />
@@ -228,7 +258,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         {patches.map((p, i) => (
           <div
             key={i}
-            className="absolute rounded-[10px] border-2 pointer-events-none z-10"
+            className="absolute rounded-[10px] border-2 pointer-events-none z-10 transition-all duration-150"
             style={{
               top:    p.r * CELL + 2,
               left:   p.c * CELL + 2,
@@ -244,7 +274,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         {ghost && (
           <div
             className="absolute pointer-events-none z-20 rounded-lg
-                       bg-blue-100/40 border-2 border-dashed border-blue-400/60"
+                       bg-blue-100/40 border-2 border-dashed border-blue-400/60 transition-all duration-150"
             style={{
               top:    ghost.r * CELL + 2,
               left:   ghost.c * CELL + 2,
@@ -259,12 +289,7 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
           <div
             key={i}
             className="absolute flex items-center justify-center pointer-events-none z-30"
-            style={{
-              top:    a.r * CELL,
-              left:   a.c * CELL,
-              width:  CELL,
-              height: CELL,
-            }}
+            style={{ top: a.r * CELL, left: a.c * CELL, width: CELL, height: CELL }}
           >
             <AnchorIcon type={a.type} number={a.number} hinted={hintIdx === i} />
           </div>
