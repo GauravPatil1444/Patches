@@ -55,13 +55,13 @@ function validatePatch(r, c, h, w, anchors, patches, ignoreIdxs = []) {
   if (a.number && h * w !== a.number) return { ok: false, reason: `Anchor requires area of ${a.number}` };
 
   const overlaps = patches.some((p, i) => {
-    // Ignore the patch(es) we are intentionally merging with
     if (ignoreIdxs.includes(i)) return false; 
     return !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
   });
   
   if (overlaps) return { ok: false, reason: "Overlaps an existing patch" };
-  return { ok: true };
+  
+  return { ok: true, anchor: a };
 }
 
 export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced, onPatchDeleted }) {
@@ -93,10 +93,26 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
 
   const finalizeDrag = useCallback((endR, endC) => {
     if (!drag) return;
-    let r = Math.min(drag.startR, endR);
-    let c = Math.min(drag.startC, endC);
-    let h = Math.abs(drag.startR - endR) + 1;
-    let w = Math.abs(drag.startC - endC) + 1;
+    
+    const { startR, startC } = drag;
+
+    // Check for deletion: If it's a simple tap/click (start and end are exactly the same)
+    if (startR === endR && startC === endC) {
+        const clickedIdx = patches.findIndex(p => 
+            startR >= p.r && startR < p.r + p.h && startC >= p.c && startC < p.c + p.w
+        );
+        // If clicking an existing patch, delete it and abort
+        if (clickedIdx !== -1) {
+            if (onPatchDeleted) onPatchDeleted(clickedIdx);
+            setDrag(null);
+            return;
+        }
+    }
+
+    let r = Math.min(startR, endR);
+    let c = Math.min(startC, endC);
+    let h = Math.abs(startR - endR) + 1;
+    let w = Math.abs(startC - endC) + 1;
 
     // Detect if the new drag overlaps existing patches to compute a MERGED bounding box
     const overlappingIdxs = patches.map((p, i) => {
@@ -121,7 +137,8 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
 
     const result = validatePatch(r, c, h, w, anchors, patches, overlappingIdxs);
     if (result.ok) {
-      onPatchPlaced({ r, c, h, w }, overlappingIdxs);
+      const anchorColor = ANCHOR_COLORS[result.anchor.type] || "#999999";
+      onPatchPlaced({ r, c, h, w, color: anchorColor }, overlappingIdxs);
       showFlash(null);
     } else {
       showFlash(result.reason, true);
@@ -129,23 +146,12 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
       setTimeout(() => setFlashGrid(false), 300);
     }
     setDrag(null);
-  }, [drag, anchors, patches, onPatchPlaced]);
-
-  const checkAndDeletePatch = (r, c) => {
-    const clickedIdx = patches.findIndex(p => 
-        r >= p.r && r < p.r + p.h && c >= p.c && c < p.c + p.w
-    );
-    if (clickedIdx !== -1) {
-        if (onPatchDeleted) onPatchDeleted(clickedIdx);
-        return true;
-    }
-    return false;
-  };
+  }, [drag, anchors, patches, onPatchPlaced, onPatchDeleted]);
 
   const onMouseDown = e => {
     if (e.button !== 0) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
-    if (checkAndDeletePatch(r, c)) return;
+    // Removed patch deletion check from here. Let it start dragging regardless.
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
@@ -162,15 +168,13 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
   };
 
   const onTouchStart = e => {
-    e.preventDefault();
     const t = e.touches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
-    if (checkAndDeletePatch(r, c)) return;
+    // Removed patch deletion check from here. Let it start dragging regardless.
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
   const onTouchMove = e => {
-    e.preventDefault();
     if (!drag) return;
     const t = e.touches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
@@ -178,7 +182,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
   };
   
   const onTouchEnd = e => {
-    e.preventDefault();
     if (!drag) return;
     const t = e.changedTouches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
@@ -199,24 +202,27 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     let h = Math.abs(drag.startR - drag.endR) + 1;
     let w = Math.abs(drag.startC - drag.endC) + 1;
 
-    const overlappingIdxs = patches.map((p, i) => {
-      const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
-      return overlaps ? i : -1;
-    }).filter(i => i !== -1);
+    // Only compute the merged visual bounding box if it's an actual drag (not a simple click)
+    if (drag.startR !== drag.endR || drag.startC !== drag.endC) {
+        const overlappingIdxs = patches.map((p, i) => {
+        const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
+        return overlaps ? i : -1;
+        }).filter(i => i !== -1);
 
-    if (overlappingIdxs.length > 0) {
-      let minR = r, minC = c, maxR = r + h, maxC = c + w;
-      overlappingIdxs.forEach(idx => {
-        const p = patches[idx];
-        minR = Math.min(minR, p.r);
-        minC = Math.min(minC, p.c);
-        maxR = Math.max(maxR, p.r + p.h);
-        maxC = Math.max(maxC, p.c + p.w);
-      });
-      r = minR;
-      c = minC;
-      h = maxR - minR;
-      w = maxC - minC;
+        if (overlappingIdxs.length > 0) {
+        let minR = r, minC = c, maxR = r + h, maxC = c + w;
+        overlappingIdxs.forEach(idx => {
+            const p = patches[idx];
+            minR = Math.min(minR, p.r);
+            minC = Math.min(minC, p.c);
+            maxR = Math.max(maxR, p.r + p.h);
+            maxC = Math.max(maxC, p.c + p.w);
+        });
+        r = minR;
+        c = minC;
+        h = maxR - minR;
+        w = maxC - minC;
+        }
     }
 
     ghost = { r, c, h, w };

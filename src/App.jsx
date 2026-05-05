@@ -7,16 +7,6 @@ import WinModal from "./components/WinModal";
 
 const API = "http://localhost:8000";
 
-const PATCH_COLORS = [
-  "#c8a830", "#4db38a", "#9b72c8", "#38b8c8",
-  "#e05030", "#50b8a0", "#e07830", "#c05080",
-  "#5890e0", "#80c040", "#e0a030", "#7070d0",
-];
-
-function getRandomColor(idx) {
-  return PATCH_COLORS[idx % PATCH_COLORS.length];
-}
-
 export default function App() {
   const [gridSize, setGridSize] = useState(6);
   const [anchors, setAnchors] = useState([]);
@@ -28,7 +18,6 @@ export default function App() {
   const [hintIdx, setHintIdx] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [timerActive, setTimerActive] = useState(false);
-  const [colorIdx, setColorIdx] = useState(0);
 
   useEffect(() => {
     if (!timerActive) return;
@@ -54,7 +43,6 @@ export default function App() {
         setAnchors(data.anchors);
         setPatches([]);
         setHistory([]);
-        setColorIdx(0);
         setTimerActive(true);
       } catch {
         setError(
@@ -73,18 +61,13 @@ export default function App() {
 
   const handlePatchPlaced = useCallback(
     (patch, replaceIdxs = []) => {
-      // Inherit color from the merged patch, otherwise generate a new one
-      const color = replaceIdxs.length > 0 
-        ? patches[replaceIdxs[0]].color 
-        : getRandomColor(colorIdx);
-        
-      const newPatch = { ...patch, color };
       setHistory((h) => [...h, patches]);
 
       setPatches((p) => {
         // Remove any patches that were merged into the new one
         let next = p.filter((_, i) => !replaceIdxs.includes(i));
-        next = [...next, newPatch];
+        // The patch already contains the correct anchor color
+        next = [...next, patch];
         
         const covered = next.reduce((s, q) => s + q.h * q.w, 0);
         if (covered === gridSize * gridSize && next.length === anchors.length) {
@@ -94,13 +77,9 @@ export default function App() {
         return next;
       });
 
-      // Only increment color index if we didn't merge
-      if (replaceIdxs.length === 0) {
-        setColorIdx((c) => c + 1);
-      }
       setHintIdx(null);
     },
-    [patches, colorIdx, anchors, gridSize],
+    [patches, anchors, gridSize],
   );
 
   const handlePatchDeleted = useCallback(
@@ -116,7 +95,6 @@ export default function App() {
     if (history.length === 0) return;
     setPatches(history[history.length - 1]);
     setHistory((h) => h.slice(0, -1));
-    setColorIdx((c) => Math.max(0, c - 1));
     setWon(false);
   };
 
