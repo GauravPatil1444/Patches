@@ -18,21 +18,13 @@ function AnchorIcon({ type, number, hinted }) {
   const color = ANCHOR_COLORS[type] ?? "#999";
   return (
     <div className={`flex items-center justify-center ${hinted ? "animate-pulse-hint" : ""}`}>
-      <svg width="22" height="22" viewBox="0 0 22 22">
-        {type === "square" && (
-          <rect x="4" y="4" width="14" height="14" rx="2.5" fill={color} opacity="0.85" />
-        )}
-        {type === "tall" && (
-          <rect x="7" y="2" width="8" height="18" rx="2.5" fill={color} opacity="0.85" />
-        )}
-        {type === "wide" && (
-          <rect x="2" y="7" width="18" height="8" rx="2.5" fill={color} opacity="0.85" />
-        )}
-        {type === "any" && (
-          <circle cx="11" cy="11" r="7" fill={color} opacity="0.75" />
-        )}
+      <svg width="36" height="36" viewBox="0 0 36 36">
+        {type === "square" && <rect x="5" y="5" width="26" height="26" rx="4" fill={color} opacity="0.85" />}
+        {type === "tall" && <rect x="10" y="3" width="16" height="30" rx="4" fill={color} opacity="0.85" />}
+        {type === "wide" && <rect x="3" y="10" width="30" height="16" rx="4" fill={color} opacity="0.85" />}
+        {type === "any" && <circle cx="18" cy="18" r="13" fill={color} opacity="0.75" />}
         {number && (
-          <text x="11" y="15" textAnchor="middle" fontSize="9" fontWeight="700" fill="#fff">
+          <text x="18" y="23" textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff">
             {number}
           </text>
         )}
@@ -42,9 +34,7 @@ function AnchorIcon({ type, number, hinted }) {
 }
 
 function validatePatch(r, c, h, w, anchors, patches, ignoreIdxs = []) {
-  const contained = anchors.filter(
-    a => a.r >= r && a.r < r + h && a.c >= c && a.c < c + w
-  );
+  const contained = anchors.filter(a => a.r >= r && a.r < r + h && a.c >= c && a.c < c + w);
   if (contained.length === 0) return { ok: false, reason: "No anchor inside patch" };
   if (contained.length > 1)   return { ok: false, reason: "Patch covers multiple anchors" };
 
@@ -60,11 +50,11 @@ function validatePatch(r, c, h, w, anchors, patches, ignoreIdxs = []) {
   });
   
   if (overlaps) return { ok: false, reason: "Overlaps an existing patch" };
-  
   return { ok: true, anchor: a };
 }
 
-export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced, onPatchDeleted }) {
+// NEW: Accept onInteraction prop
+export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPatchPlaced, onPatchDeleted, onInteraction }) {
   const [drag, setDrag]         = useState(null);
   const [flashMsg, setFlashMsg] = useState(null);
   const [flashGrid, setFlashGrid] = useState(false);
@@ -96,12 +86,10 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     
     const { startR, startC } = drag;
 
-    // Check for deletion: If it's a simple tap/click (start and end are exactly the same)
     if (startR === endR && startC === endC) {
         const clickedIdx = patches.findIndex(p => 
             startR >= p.r && startR < p.r + p.h && startC >= p.c && startC < p.c + p.w
         );
-        // If clicking an existing patch, delete it and abort
         if (clickedIdx !== -1) {
             if (onPatchDeleted) onPatchDeleted(clickedIdx);
             setDrag(null);
@@ -114,7 +102,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     let h = Math.abs(startR - endR) + 1;
     let w = Math.abs(startC - endC) + 1;
 
-    // Detect if the new drag overlaps existing patches to compute a MERGED bounding box
     const overlappingIdxs = patches.map((p, i) => {
       const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
       return overlaps ? i : -1;
@@ -149,9 +136,9 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
   }, [drag, anchors, patches, onPatchPlaced, onPatchDeleted]);
 
   const onMouseDown = e => {
+    if (onInteraction) onInteraction(); // NEW: Trigger Timer Start
     if (e.button !== 0) return;
     const { r, c } = getCellFromXY(e.clientX, e.clientY);
-    // Removed patch deletion check from here. Let it start dragging regardless.
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
@@ -168,9 +155,9 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
   };
 
   const onTouchStart = e => {
+    if (onInteraction) onInteraction(); // NEW: Trigger Timer Start
     const t = e.touches[0];
     const { r, c } = getCellFromXY(t.clientX, t.clientY);
-    // Removed patch deletion check from here. Let it start dragging regardless.
     setDrag({ startR: r, startC: c, endR: r, endC: c });
   };
   
@@ -194,7 +181,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     return () => window.removeEventListener("mouseup", up);
   }, [drag]);
 
-  // Ghost rectangle calculates the real-time merged visual layout during drag
   let ghost = null;
   if (drag) {
     let r = Math.min(drag.startR, drag.endR);
@@ -202,7 +188,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
     let h = Math.abs(drag.startR - drag.endR) + 1;
     let w = Math.abs(drag.startC - drag.endC) + 1;
 
-    // Only compute the merged visual bounding box if it's an actual drag (not a simple click)
     if (drag.startR !== drag.endR || drag.startC !== drag.endC) {
         const overlappingIdxs = patches.map((p, i) => {
         const overlaps = !(r + h <= p.r || r >= p.r + p.h || c + w <= p.c || c >= p.c + p.w);
@@ -224,7 +209,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         w = maxC - minC;
         }
     }
-
     ghost = { r, c, h, w };
   }
 
@@ -250,7 +234,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-        {/* Grid lines */}
         <svg className="absolute inset-0 pointer-events-none" width={BOARD} height={BOARD}>
           {Array.from({ length: gridSize + 1 }).map((_, i) => (
             <g key={i}>
@@ -260,7 +243,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
           ))}
         </svg>
 
-        {/* Placed patches */}
         {patches.map((p, i) => (
           <div
             key={i}
@@ -276,7 +258,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
           />
         ))}
 
-        {/* Ghost preview */}
         {ghost && (
           <div
             className="absolute pointer-events-none z-20 rounded-lg
@@ -290,7 +271,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
           />
         )}
 
-        {/* Anchor icons */}
         {anchors.map((a, i) => (
           <div
             key={i}
@@ -301,7 +281,6 @@ export default function PuzzleBoard({ gridSize, anchors, patches, hintIdx, onPat
           </div>
         ))}
 
-        {/* Outer border overlay */}
         <div className="absolute inset-0 rounded-xl border-2 border-gray-300 pointer-events-none z-40" />
       </div>
     </div>
